@@ -1,5 +1,20 @@
 <?php
-
+/**
+ * Mailing lists service.
+ * 
+ * LICENSE
+ *
+ * This source file is subject to the new BSD license that is bundled
+ * with this package in the file LICENSE.txt.
+ * It is also available through the world-wide-web at this URL:
+ * http://framework.zend.com/license/new-bsd
+ * 
+ * @author     Juan Pedro Gonzalez Gutierrez
+ * @copyright  Copyright (c) 2012-2013 Juan Pedro Gonzalez Gutierrez (http://www.jpg-consulting.es)
+ * @license    http://framework.zend.com/license/new-bsd     New BSD License
+ * 
+ *
+ */
 
 class Mailman_Service_Mailman
 {
@@ -20,6 +35,13 @@ class Mailman_Service_Mailman
 	 * @var string
 	 */
 	protected $_password;
+	
+	/**
+	 * A translator.
+	 * (Use with errors for easier management)
+	 * @var Zend_Translate
+	 */
+	//protected $_translator;
 	
 
 	/**
@@ -48,6 +70,33 @@ class Mailman_Service_Mailman
 			$this->setPassword($password);
 		}
 	}
+	
+	
+	/**
+	 * Get the translator.
+	 * 
+	 * @return Zend_Translate|null
+	 */
+	/*
+	public function getTranslator()
+	{
+		if (null === $this->_translator) {
+			if (Zend_Registry::isRegistered('Zend_Translate')) {
+				$translator = Zend_Registry::get('Zend_Translate');
+				if ($translator instanceof Zend_Translate) {
+					$this->_translator = new Zend_Translate(array(
+						'adapter'        => 'gettext',
+						'content'        => dirname(__FILE__) . '/Mailman/messages',
+						'locale'         => (string)$translator->getLocale(),
+						'scan'           => Zend_Translate::LOCALE_DIRECTORY,
+						'disableNotices' => true
+					));
+				}
+			}
+		}
+		return $this->_translator;
+	}
+	*/
 	
 	/**
 	 * Sets the current mailing-list.
@@ -248,6 +297,19 @@ class Mailman_Service_Mailman
 				if (strcasecmp($h5, 'Successfully subscribed:') === 0) {
 					return true;
 				} else {
+					if (strcasecmp($h5, 'Error subscribing:') === 0) {
+						$li = $xpath->query('/html/body/ul/li');
+						if ($li) {
+							if ($li->length > 0) {
+								// Get and translate all "Li"s
+								$li_value = trim((string)$li->item(0)->nodeValue);
+								$h5 = trim((string)$li->item(0)->nodeValue);
+							}			
+						}
+					}
+					/*if (null !== $this->getTranslator()) {
+						$h5 = $this->getTranslator()->translate($h5);
+					}*/
 					$h5 = trim(rtrim($h5, ':'));
 					if (empty($h5)) $h5 = 'Unknown error';
 					require_once 'Mailman/Service/Mailman/Exception.php';
@@ -311,6 +373,9 @@ class Mailman_Service_Mailman
 				if (strcasecmp($h5, 'Successfully Unsubscribed:') === 0) {
 					return true;
 				} else {
+					/*if (null !== $this->getTranslator()) {
+						$h5 = $this->getTranslator()->translate($h5);
+					}*/
 					$h5 = trim(rtrim($h5, ':'));
 					if (empty($h5)) $h5 = 'Unknown error';
 					require_once 'Mailman/Service/Mailman/Exception.php';
@@ -322,9 +387,11 @@ class Mailman_Service_Mailman
 		// Some errors are displayed in h3
 		if ($h3) {
 			if ($h3->length > 0) {
+				/*if (null !== $this->getTranslator()) {
+					$h3 = $this->getTranslator()->translate($h3);
+				}*/
 				$h3 = trim(rtrim($h3, ':'));
 				if (empty($h3)) $h3 = 'Unknown error';
-				require_once 'Mailman/Service/Mailman/Exception.php';
 				throw new Mailman_Service_Mailman_Exception($h3);
 			}
 		}
@@ -333,4 +400,89 @@ class Mailman_Service_Mailman
 		throw new Mailman_Service_Mailman_Exception("Failed to parse response");
 	}
 	
+	/**
+	 * Find a member.
+	 * 
+	 * @param string $text
+	 * @throws Mailman_Service_Mailman_Exception
+	 */
+	public function findMember( $text )
+	{
+		if (!is_string($text))
+		{
+			require_once 'Mailman/Service/Mailman/Exception.php';
+			throw new Mailman_Service_Mailman_Exception('findMember() expects parameter to be string, ' . gettype($text) . ' given');
+		}
+		
+		// forge URI
+		$uri = $this->getUri('members', array(
+			'findmember'        => $text, 
+			'setmemberopts_btn' => null,
+			'adminpw' => $this->_password
+		));
+		
+		// Fetch content
+		$html = $this->_submit($uri);
+		
+		if (function_exists('libxml_use_internal_errors')) {
+			libxml_use_internal_errors(true);
+		}
+		
+		// Create a DOM document with retrieved content
+		$dom = new DOMDocument();
+		$dom->preserveWhiteSpace = false;
+		$dom->loadHTML($html);
+		
+		// XPath for navigation
+		$xpath = new DOMXPath($dom);
+		
+		
+		$queries = array(
+			'address'  => $xpath->query('/html/body/form/center/table/tr/td[2]/a'),
+        	'realname' => $xpath->query('/html/body/form/center/table/tr/td[2]/input[type=TEXT]/@value'),
+	        'mod'      => $xpath->query('/html/body/form/center/table/tr/td[3]/center/input/@value'),
+	        'hide'     => $xpath->query('/html/body/form/center/table/tr/td[4]/center/input/@value'),
+	        'nomail'   => $xpath->query('/html/body/form/center/table/tr/td[5]/center/input/@value'),
+	        'ack'      => $xpath->query('/html/body/form/center/table/tr/td[6]/center/input/@value'),
+	        'notmetoo' => $xpath->query('/html/body/form/center/table/tr/td[7]/center/input/@value'),
+	        'nodupes'  => $xpath->query('/html/body/form/center/table/tr/td[8]/center/input/@value'),
+	        'digest'   => $xpath->query('/html/body/form/center/table/tr/td[9]/center/input/@value'),
+	        'plain'    => $xpath->query('/html/body/form/center/table/tr/td[10]/center/input/@value'),
+	        'language' => $xpath->query('/html/body/form/center/table/tr/td[11]/center/select/option[@selected]/@value')
+		);
+		
+		if (function_exists('libxml_clear_errors')) {
+			libxml_clear_errors();
+		}
+		
+		$count = $queries['address']->length;
+		if (!$count) {
+			require_once 'Mailman/Service/Mailman/Exception.php';
+			throw new Mailman_Service_Mailman_Exception('No match' /*,Services_Mailman_Exception::NO_MATCH*/);
+        }
+        $a = array();
+        for ($i=0;$i < $count;$i++) {
+            foreach ($queries as $key => $query) {
+                $a[$i][$key] = $query->item($i) ? $query->item($i)->nodeValue : '';
+            }
+        }
+        return $a;
+	}
+	
+	public function isSubscribedEmail( $email )
+	{
+		if (!$this->_isValidEmailAddress($email)) {
+			require_once 'Mailman/Service/Mailman/Exception.php';
+			throw new Mailman_Service_Mailman_Exception('Invalid email address');
+		}
+		
+		$subscribers = $this->findMember( $email );
+		foreach ($subscribers as $subscriber) {
+			if (strcasecmp($subscriber['address'], $email) === 0) {
+				return true;
+			}
+		}
+		
+		return false;
+	}
 }
